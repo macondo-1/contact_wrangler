@@ -5,3 +5,6 @@ __pycache__/
 .env
 .DS_Store
 docs/plans/
+*.egg-info/
+.pytest_cache/
+alembic.ini
