@@ -23,6 +23,8 @@ from sqlalchemy import (
     ,UniqueConstraint
     ,func
     ,Computed
+    ,true
+    ,false
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -97,6 +99,11 @@ class MailingStrategy(enum.Enum):
 
 class Contact(TimestampMixin, Base):
     __tablename__ = "contacts"
+    __table_args__ = (
+        Index("ix_contacts_active_validation", "is_active", "email_validation"),
+        Index("ix_contacts_country", "country"),
+        Index("ix_contacts_ethnicity", "ethnicity"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str | None]
@@ -142,8 +149,8 @@ class Contact(TimestampMixin, Base):
     email_validation: Mapped[EmailValidation | None] = mapped_column(
         Enum(EmailValidation, name="email_validation")
     )
-    is_active: Mapped[bool] = mapped_column(default=True)
-    is_opt_in: Mapped[bool] = mapped_column(default=False)
+    is_active: Mapped[bool] = mapped_column(default=True, server_default=true())
+    is_opt_in: Mapped[bool] = mapped_column(default=False, server_default=false())
     is_gmail: Mapped[bool] = mapped_column(Computed("lower(email) LIKE '%@gmail.com'"))
     email_domain: Mapped[str | None] = mapped_column(Computed("split_part(email, '@', 2)"))
 
@@ -163,6 +170,7 @@ class Campaign(TimestampMixin, Base):
     status: Mapped[CampaignStatus] = mapped_column(
         Enum(CampaignStatus, name="campaign_status"),
         default=CampaignStatus.DRAFT,
+        server_default=CampaignStatus.DRAFT.name,
     )
     start_date: Mapped[date | None] = mapped_column(Date)
     end_date: Mapped[date | None] = mapped_column(Date)
@@ -177,7 +185,11 @@ class Campaign(TimestampMixin, Base):
 
 class CampaignContact(Base):
     __tablename__ = "campaign_contacts"
-    __table_args__ = (UniqueConstraint("campaign_id", "contact_id"),)
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "contact_id"),
+        Index("ix_campaign_contacts_contact_last_sent", "contact_id", "last_sent_at"),
+        Index("ix_campaign_contacts_quota", "quota_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"))
@@ -186,6 +198,7 @@ class CampaignContact(Base):
     status: Mapped[AssignmentStatus] = mapped_column(
         Enum(AssignmentStatus, name="assignment_status"),
         default=AssignmentStatus.PENDING,
+        server_default=AssignmentStatus.PENDING.name,
     )
     assigned_at: Mapped[datetime] = mapped_column(server_default=func.now())
     last_sent_at: Mapped[datetime | None]
