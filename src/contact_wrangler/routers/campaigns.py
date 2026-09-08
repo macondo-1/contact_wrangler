@@ -62,3 +62,11 @@ def list_campaigns(
         query = query.where(Campaign.status == status)
     query = query.order_by(Campaign.id).limit(limit).offset(offset)
     return db.scalars(query).all()
+
+
+@router.get("/{campaign_id}", response_model=CampaignOut)
+def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
+    campaign = db.get(Campaign, campaign_id)
+    if campaign is None:
+        raise HTTPException(404, f"Campaign {campaign_id} not found")
+    return campaign
