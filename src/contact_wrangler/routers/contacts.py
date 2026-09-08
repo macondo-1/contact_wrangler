@@ -14,6 +14,17 @@ from contact_wrangler.models import Contact, EmailValidation
 router = APIRouter(prefix="/contacts", tags=["contacts"])
 
 
+def _escape_like(value: str) -> str:
+    """Escape LIKE/ILIKE metacharacters in user-supplied search text.
+
+    Without this, a literal '%' or '_' in a search value is interpreted by
+    Postgres as a wildcard rather than a literal character -- e.g. searching
+    first_name="A_B" would also match "AxB", "A1B", etc. Must pair with
+    ilike(..., escape="\\") wherever this is used.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class ImportResult(BaseModel):
     inserted: int
     skipped_duplicates: list[str]
@@ -86,11 +97,17 @@ def search_contacts(
     query = select(Contact)
 
     if email:
-        query = query.where(Contact.email.ilike(f"%{email}%"))
+        query = query.where(
+            Contact.email.ilike(f"%{_escape_like(email)}%", escape="\\")
+        )
     if first_name:
-        query = query.where(Contact.first_name.ilike(f"%{first_name}%"))
+        query = query.where(
+            Contact.first_name.ilike(f"%{_escape_like(first_name)}%", escape="\\")
+        )
     if last_name:
-        query = query.where(Contact.last_name.ilike(f"%{last_name}%"))
+        query = query.where(
+            Contact.last_name.ilike(f"%{_escape_like(last_name)}%", escape="\\")
+        )
     if country:
         query = query.where(Contact.country == country)
     if industry:
