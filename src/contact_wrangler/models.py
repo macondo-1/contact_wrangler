@@ -151,7 +151,9 @@ class Contact(TimestampMixin, Base):
     )
     is_active: Mapped[bool] = mapped_column(default=True, server_default=true())
     is_opt_in: Mapped[bool] = mapped_column(default=False, server_default=false())
-    is_gmail: Mapped[bool] = mapped_column(Computed("lower(email) LIKE '%@gmail.com'"))
+    is_gmail: Mapped[bool] = mapped_column(
+        Computed("COALESCE(lower(email) LIKE '%@gmail.com', false)")
+    )
     email_domain: Mapped[str | None] = mapped_column(Computed("split_part(email, '@', 2)"))
 
     campaign_links: Mapped[list["CampaignContact"]] = relationship(

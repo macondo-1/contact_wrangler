@@ -1,17 +1,19 @@
-import os
+from fastapi import Depends, FastAPI
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-from fastapi import FastAPI
-from sqlalchemy import create_engine, text
-from dotenv import load_dotenv
-
-load_dotenv('.env')
-DATABASE_URL = os.environ.get('DATABASE_URL')
+from contact_wrangler.db import get_db
+from contact_wrangler.routers import campaigns, contacts, dashboard, events
 
 app = FastAPI()
 
+app.include_router(contacts.router)
+app.include_router(campaigns.router)
+app.include_router(events.router)
+app.include_router(dashboard.router)
+
+
 @app.get("/health")
-def health():
-    engine = create_engine(DATABASE_URL)
-    with engine.connect() as conn:
-        conn.execute(text("SELECT 1"))
+def health(db: Session = Depends(get_db)):
+    db.execute(text("SELECT 1"))
     return {"status": "ok"}
