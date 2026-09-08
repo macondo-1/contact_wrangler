@@ -8,8 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from contact_wrangler.db import get_db
+from contact_wrangler.eligibility import eligible_contacts_for_campaign
 from contact_wrangler.ingestion import import_contacts
-from contact_wrangler.models import Contact, EmailValidation
+from contact_wrangler.models import Campaign, Contact, EmailValidation
 
 router = APIRouter(prefix="/contacts", tags=["contacts"])
 
@@ -102,6 +103,28 @@ def search_contacts(
 
     query = query.order_by(Contact.id).limit(limit).offset(offset)
 
+    return db.scalars(query).all()
+
+
+@router.get("/eligible", response_model=list[ContactOut])
+def get_eligible_contacts(campaign_id: int, db: Session = Depends(get_db)):
+    """Wires up the Phase 1.8 assignment-time eligibility query: which
+    contacts are eligible to be newly assigned to `campaign_id` right now.
+    NOTE: this is the ASSIGNMENT-time check (no cooldown) -- the SEND-time
+    check (sendable_assignments_for_campaign, which does apply the cooldown)
+    belongs to Task 3.8's assignment endpoint instead, once campaign_contacts
+    rows actually exist to check cooldown against.
+
+    Registered before /{contact_id} deliberately: FastAPI matches routes in
+    registration order, and a literal path like /eligible must come before
+    a variable path like /{contact_id}, or a request to /contacts/eligible
+    would incorrectly match /{contact_id} first and 422 (failing to parse
+    "eligible" as an int) instead of ever reaching this route.
+    """
+    if db.get(Campaign, campaign_id) is None:
+        raise HTTPException(404, f"Campaign {campaign_id} not found")
+
+    query = eligible_contacts_for_campaign(campaign_id)
     return db.scalars(query).all()
 
 
