@@ -1,7 +1,8 @@
 from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -47,3 +48,17 @@ def create_campaign(payload: CampaignCreate, db: Session = Depends(get_db)):
         )
     db.refresh(campaign)
     return campaign
+
+
+@router.get("/", response_model=list[CampaignOut])
+def list_campaigns(
+    status: CampaignStatus | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    query = select(Campaign)
+    if status is not None:
+        query = query.where(Campaign.status == status)
+    query = query.order_by(Campaign.id).limit(limit).offset(offset)
+    return db.scalars(query).all()
