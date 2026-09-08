@@ -13,7 +13,7 @@ router = APIRouter(prefix="/contacts", tags=["contacts"])
 
 class ImportResult(BaseModel):
     inserted: int
-    skipped_duplicates: list[str]
+    skipped_duplicate_count: int
 
 
 @router.post("/import", response_model=ImportResult)
