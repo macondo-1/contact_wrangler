@@ -229,7 +229,10 @@ def list_campaign_quotas(campaign_id: int, db: Session = Depends(get_db)):
             current_count=db.scalar(
                 select(func.count())
                 .select_from(CampaignContact)
-                .where(CampaignContact.quota_id == quota.id)
+                .where(
+                    CampaignContact.quota_id == quota.id,
+                    CampaignContact.status != AssignmentStatus.EXCLUDED,
+                )
             ),
         )
         for quota in quotas
