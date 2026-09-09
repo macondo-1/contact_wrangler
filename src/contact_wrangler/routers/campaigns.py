@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from contact_wrangler.db import get_db
+from contact_wrangler.eligibility import baseline_contactable_filters
 from contact_wrangler.models import (
     AssignmentStatus,
     Campaign,
@@ -17,6 +18,13 @@ from contact_wrangler.models import (
 )
 
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
+
+
+def get_or_404(db: Session, model, obj_id: int, label: str):
+    obj = db.get(model, obj_id)
+    if obj is None:
+        raise HTTPException(404, f"{label} {obj_id} not found")
+    return obj
 
 
 class CampaignCreate(BaseModel):
@@ -73,10 +81,7 @@ def list_campaigns(
 
 @router.get("/{campaign_id}", response_model=CampaignOut)
 def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
-    campaign = db.get(Campaign, campaign_id)
-    if campaign is None:
-        raise HTTPException(404, f"Campaign {campaign_id} not found")
-    return campaign
+    return get_or_404(db, Campaign, campaign_id, "Campaign")
 
 
 class AssignmentCreate(BaseModel):
@@ -105,14 +110,38 @@ def assign_contact(
     (accept), but the response flags it via quota_exceeded -- a human
     decides what to do about it, rather than the API hard-blocking it.
     """
-    if db.get(Campaign, campaign_id) is None:
-        raise HTTPException(404, f"Campaign {campaign_id} not found")
-    if db.get(Contact, payload.contact_id) is None:
-        raise HTTPException(404, f"Contact {payload.contact_id} not found")
+    campaign = get_or_404(db, Campaign, campaign_id, "Campaign")
+    if campaign.status in (CampaignStatus.COMPLETED, CampaignStatus.PAUSED):
+        raise HTTPException(
+            409,
+            f"Campaign {campaign_id} is {campaign.status.value}, no new assignments allowed",
+        )
+
+    contact = get_or_404(db, Contact, payload.contact_id, "Contact")
+    is_contactable = (
+        db.scalar(
+            select(Contact.id).where(
+                Contact.id == contact.id, *baseline_contactable_filters()
+            )
+        )
+        is not None
+    )
+    if not is_contactable:
+        raise HTTPException(
+            400,
+            f"Contact {payload.contact_id} is not contactable "
+            "(inactive, not opted in, missing email, or invalid email)",
+        )
 
     quota_exceeded = False
     if payload.quota_id is not None:
-        quota = db.get(CampaignQuota, payload.quota_id)
+        # with_for_update locks this quota row for the rest of the
+        # transaction, so a second concurrent request against the SAME
+        # quota_id blocks until this one commits (or rolls back) --
+        # without it, two near-simultaneous requests could both read
+        # current_count as under target and both insert, silently
+        # exceeding target_count with neither response ever flagging it.
+        quota = db.get(CampaignQuota, payload.quota_id, with_for_update=True)
         if quota is None or quota.campaign_id != campaign_id:
             raise HTTPException(
                 400,
@@ -121,7 +150,12 @@ def assign_contact(
         current_count = db.scalar(
             select(func.count())
             .select_from(CampaignContact)
-            .where(CampaignContact.quota_id == payload.quota_id)
+            .where(
+                CampaignContact.quota_id == payload.quota_id,
+                # EXCLUDED assignments explicitly don't count toward the
+                # quota they were excluded from.
+                CampaignContact.status != AssignmentStatus.EXCLUDED,
+            )
         )
         quota_exceeded = current_count >= quota.target_count
 
@@ -134,6 +168,14 @@ def assign_contact(
     try:
         db.commit()
     except IntegrityError:
+        # By this point campaign/contact/quota have all already been
+        # confirmed to exist above, so in practice this is almost always
+        # the (campaign_id, contact_id) unique constraint -- the narrow
+        # exception is a genuinely concurrent delete of one of those rows
+        # between the checks above and this commit, which would still
+        # surface here as this same message (acknowledged, not fixed:
+        # the failure window is narrow enough that a driver-specific
+        # constraint-name check isn't worth the added coupling right now).
         db.rollback()
         raise HTTPException(
             409,

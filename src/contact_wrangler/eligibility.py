@@ -55,7 +55,7 @@ from sqlalchemy.orm import aliased
 from contact_wrangler.models import AssignmentStatus, CampaignContact, Contact, EmailValidation
 
 
-def _baseline_contactable_filters():
+def baseline_contactable_filters():
     """Shared baseline contactability conditions, reused at both assignment
     time and send time (a contact could opt out or bounce between the two).
     """
@@ -75,7 +75,7 @@ def eligible_contacts_for_campaign(campaign_id: int) -> Select:
     """Build (not execute) a query for contacts to newly assign to `campaign_id`.
 
     A contact is eligible when:
-      - baseline contactable (see _baseline_contactable_filters)
+      - baseline contactable (see baseline_contactable_filters)
       - not already assigned to this specific campaign
 
     Deliberately no cooldown check here -- see module docstring.
@@ -90,7 +90,7 @@ def eligible_contacts_for_campaign(campaign_id: int) -> Select:
     )
 
     return select(Contact).where(
-        *_baseline_contactable_filters(),
+        *baseline_contactable_filters(),
         ~already_assigned,
     )
 
@@ -136,7 +136,7 @@ def sendable_assignments_for_campaign(
         .where(
             CampaignContact.campaign_id == campaign_id,
             CampaignContact.status == AssignmentStatus.PENDING,
-            *_baseline_contactable_filters(),
+            *baseline_contactable_filters(),
             ~recently_contacted,
         )
     )
