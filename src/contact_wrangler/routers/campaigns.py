@@ -17,6 +17,7 @@ from contact_wrangler.models import (
     Contact,
 )
 
+
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
 
@@ -192,3 +193,44 @@ def assign_contact(
         assigned_at=assignment.assigned_at,
         quota_exceeded=quota_exceeded,
     )
+
+
+class QuotaOut(BaseModel):
+    id: int
+    campaign_id: int
+    dimension: str
+    dimension_value: str
+    target_count: int
+    message_template: str | None
+    current_count: int
+
+
+@router.get("/{campaign_id}/quotas", response_model=list[QuotaOut])
+def list_campaign_quotas(campaign_id: int, db: Session = Depends(get_db)):
+    """current_count is computed on read (COUNT() against campaign_contacts),
+    consistent with the Phase 1 decision not to store a denormalized counter
+    that could drift out of sync.
+    """
+    if db.get(Campaign, campaign_id) is None:
+        raise HTTPException(404, f"Campaign {campaign_id} not found")
+
+    quotas = db.scalars(
+        select(CampaignQuota).where(CampaignQuota.campaign_id == campaign_id)
+    ).all()
+
+    return [
+        QuotaOut(
+            id=quota.id,
+            campaign_id=quota.campaign_id,
+            dimension=quota.dimension,
+            dimension_value=quota.dimension_value,
+            target_count=quota.target_count,
+            message_template=quota.message_template,
+            current_count=db.scalar(
+                select(func.count())
+                .select_from(CampaignContact)
+                .where(CampaignContact.quota_id == quota.id)
+            ),
+        )
+        for quota in quotas
+    ]
