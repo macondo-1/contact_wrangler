@@ -1,5 +1,5 @@
 import plotly.graph_objects as go
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from plotly.subplots import make_subplots
 from pydantic import BaseModel
@@ -11,21 +11,36 @@ from contact_wrangler.models import AssignmentStatus, Campaign, CampaignContact
 
 router = APIRouter(tags=["dashboard"])
 
-# Fixed order so the response is stable and chart-ready (Phase 6 Plotly funnel)
-# even when some stages currently have zero assignments -- a chart backed by
-# a varying set of stages (whatever happens to have data today) would jump
-# around release to release, which is worse for a funnel visualization than
-# always showing every stage, count 0 included.
-FUNNEL_ORDER = [
+# Campaign.id is a plain Postgres INTEGER (4-byte) primary key. Bounding
+# campaign_id to that range up front makes an absurdly large value a 422
+# (FastAPI validation) instead of an unhandled 500 -- psycopg raises
+# NumericValueOutOfRange if a bigger Python int is ever bound into an
+# int4 query parameter.
+_CAMPAIGN_ID_QUERY = Query(default=None, ge=1, le=2_147_483_647)
+
+# Task 6.2: split for the Plotly view. PRIMARY_STAGES is a genuine
+# progression a contact moves through in order; EXCEPTION_STAGES are
+# terminal side-branches a contact lands in INSTEAD of continuing (e.g.
+# BOUNCED doesn't happen "after" REPLIED). Charting all 8 as one funnel
+# would visually imply a monotonic decline that isn't real, so the funnel
+# only covers PRIMARY_STAGES, with EXCEPTION_STAGES broken out as a
+# separate bar chart alongside it. FUNNEL_ORDER (the JSON endpoint's fixed
+# stage order) is derived from these two rather than kept as an
+# independent third list, so there's exactly one place that has to be
+# updated if a status is ever added, moved, or removed.
+PRIMARY_STAGES = [
     AssignmentStatus.PENDING,
     AssignmentStatus.SENT,
     AssignmentStatus.OPENED,
     AssignmentStatus.CLICKED,
     AssignmentStatus.REPLIED,
+]
+EXCEPTION_STAGES = [
     AssignmentStatus.BOUNCED,
     AssignmentStatus.UNSUBSCRIBED,
     AssignmentStatus.EXCLUDED,
 ]
+FUNNEL_ORDER = PRIMARY_STAGES + EXCEPTION_STAGES
 
 # Task 6.2: split for the Plotly view. PRIMARY_STAGES is a genuine
 # progression a contact moves through in order; EXCEPTION_STAGES are
@@ -71,7 +86,9 @@ def _funnel_counts(
 
 
 @router.get("/dashboard", response_model=list[FunnelStage])
-def get_dashboard(campaign_id: int | None = None, db: Session = Depends(get_db)):
+def get_dashboard(
+    campaign_id: int | None = _CAMPAIGN_ID_QUERY, db: Session = Depends(get_db)
+):
     """Funnel-style aggregate: count of campaign_contacts assignments
     currently at each status, in a fixed stage order. Optionally scoped to
     one campaign_id; global across all campaigns if omitted.
@@ -84,7 +101,9 @@ def get_dashboard(campaign_id: int | None = None, db: Session = Depends(get_db))
 
 
 @router.get("/dashboard/view", response_class=HTMLResponse)
-def get_dashboard_view(campaign_id: int | None = None, db: Session = Depends(get_db)):
+def get_dashboard_view(
+    campaign_id: int | None = _CAMPAIGN_ID_QUERY, db: Session = Depends(get_db)
+):
     """Task 6.2: same aggregate as GET /dashboard, rendered as a Plotly
     chart instead of raw JSON -- a funnel for the real PENDING->...->REPLIED
     progression, plus a bar chart for the terminal exception stages.
@@ -114,7 +133,11 @@ def get_dashboard_view(campaign_id: int | None = None, db: Session = Depends(get
         row=1,
         col=2,
     )
-    title = "Campaign Funnel" if campaign_id is None else f"Campaign {campaign_id} Funnel"
+    title = "Campaign Funnel" + ("" if campaign_id is None else f" (Campaign {campaign_id})")
     fig.update_layout(title=title, showlegend=False)
 
-    return fig.to_html(full_html=True, include_plotlyjs="cdn")
+    # include_plotlyjs=True embeds the ~4MB plotly.js library directly in
+    # the page rather than pointing at a CDN -- this route works even in
+    # an offline/egress-restricted deployment, and the extra page weight
+    # is a non-issue for a low-traffic reporting view.
+    return fig.to_html(full_html=True, include_plotlyjs=True)
