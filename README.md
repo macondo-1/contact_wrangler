@@ -31,6 +31,18 @@ image), but if the Docker build is ever hardened to a `--no-dev`
 production install, this script would need `faker` installed separately
 (e.g. `uv pip install faker`) to keep working.
 
+## Dashboard
+
+`GET /dashboard` returns a funnel-style JSON aggregate (assignment counts
+per status, fixed stage order, optionally scoped with `?campaign_id=`).
+`GET /dashboard/view` renders the same data as an interactive Plotly page
+-- a funnel chart for the real PENDING -> SENT -> OPENED -> CLICKED ->
+REPLIED progression, plus a separate bar chart for the terminal exception
+statuses (BOUNCED / UNSUBSCRIBED / EXCLUDED), which aren't further steps
+in that progression and would misrepresent a real funnel if lumped in
+with it. Visit `http://localhost:8001/dashboard/view` (add `?campaign_id=`
+to scope it) once the stack is running.
+
 ## Tests
 
 ```
