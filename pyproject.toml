@@ -22,4 +22,7 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "faker>=40.38.0",
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "testcontainers[postgres]>=4.15.0",
 ]
