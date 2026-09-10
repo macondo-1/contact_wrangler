@@ -73,6 +73,27 @@ INDUSTRIES = ["Tech", "Finance", "Healthcare", "Retail", "Manufacturing", "Educa
 # would wrongly see them as recently contacted.
 NEVER_SENT_STATUSES = {AssignmentStatus.PENDING, AssignmentStatus.EXCLUDED}
 
+# Weighted, not uniform: a plain random.choice() across all 8 statuses
+# produces near-identical counts everywhere (~1/8 each), which renders as
+# a flat rectangle on the Phase 6 dashboard instead of an actual funnel
+# shape -- a real campaign has most contacts still PENDING/early, with a
+# real drop-off through OPENED/CLICKED/REPLIED, plus a smaller tail of
+# exception outcomes. Order matches AssignmentStatus's declaration order.
+ASSIGNMENT_STATUS_WEIGHTS = {
+    AssignmentStatus.PENDING: 30,
+    AssignmentStatus.SENT: 25,
+    AssignmentStatus.OPENED: 15,
+    AssignmentStatus.CLICKED: 8,
+    AssignmentStatus.REPLIED: 4,
+    AssignmentStatus.BOUNCED: 8,
+    AssignmentStatus.UNSUBSCRIBED: 5,
+    AssignmentStatus.EXCLUDED: 5,
+}
+assert set(ASSIGNMENT_STATUS_WEIGHTS) == set(AssignmentStatus), (
+    "ASSIGNMENT_STATUS_WEIGHTS must cover every AssignmentStatus, or a new "
+    "status silently never gets assigned to any seeded assignment"
+)
+
 
 def gen_contact_row(recent_emails: deque[str]) -> dict:
     """One fake contact row, occasionally a deliberate duplicate (exact,
@@ -209,7 +230,10 @@ def seed_assignments_and_events(
 
         assignment_rows = []
         for contact_id in chosen_contacts:
-            status = random.choice(list(AssignmentStatus))
+            status = random.choices(
+                list(ASSIGNMENT_STATUS_WEIGHTS),
+                weights=list(ASSIGNMENT_STATUS_WEIGHTS.values()),
+            )[0]
             assignment_rows.append({
                 "campaign_id": campaign_id,
                 "contact_id": contact_id,
