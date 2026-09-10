@@ -30,3 +30,17 @@ today (the Dockerfile doesn't currently exclude dev dependencies from the
 image), but if the Docker build is ever hardened to a `--no-dev`
 production install, this script would need `faker` installed separately
 (e.g. `uv pip install faker`) to keep working.
+
+## Tests
+
+```
+uv run pytest
+```
+
+Run this **on the host**, not via `docker compose exec` -- the suite uses
+`testcontainers[postgres]` to spin up a throwaway Postgres container per
+test session (migrated with the real Alembic chain, then rolled back per
+test via a SAVEPOINT), which needs direct access to the Docker daemon.
+Running on the host reaches that daemon naturally; running inside the app
+container would require mounting the Docker socket into it just for
+tests. Docker Desktop (or another local Docker daemon) must be running.
