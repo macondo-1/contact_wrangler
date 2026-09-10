@@ -23,18 +23,31 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 from testcontainers.community.postgres import PostgresContainer
 
+# contact_wrangler.db reads DATABASE_URL from the environment at IMPORT
+# time (module-level `create_engine(os.environ["DATABASE_URL"])`), and
+# importing contact_wrangler.api below pulls that in transitively. On a
+# fresh clone/CI with no .env, that import would crash with KeyError
+# before the throwaway container even starts. setdefault (not a plain
+# assignment) ensures a syntactically-valid-but-unused URL only when
+# nothing is already set -- this module-level engine is never actually
+# used by tests (the `client` fixture overrides get_db with the real
+# testcontainers session instead), so it never needs to connect.
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+psycopg://unused:unused@localhost/unused"
+)
+
 from contact_wrangler.api import app
 from contact_wrangler.db import get_db
+from contact_wrangler.models import Campaign, Contact
 
 
 @pytest.fixture(scope="session")
 def db_url():
-    with PostgresContainer("postgres:16") as container:
-        # testcontainers defaults to the psycopg2 driver in the URL;
-        # this project uses psycopg (v3) everywhere else.
-        yield container.get_connection_url().replace(
-            "postgresql+psycopg2", "postgresql+psycopg"
-        )
+    # testcontainers defaults to the psycopg2 driver in the connection
+    # URL; this project uses psycopg (v3) everywhere else, so ask for it
+    # directly rather than string-replacing the URL after the fact.
+    with PostgresContainer("postgres:16", driver="psycopg") as container:
+        yield container.get_connection_url()
 
 
 @pytest.fixture(scope="session")
@@ -92,5 +105,41 @@ def client(db_session):
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app)
+    # Entered as a context manager so ASGI lifespan (startup/shutdown)
+    # events actually run -- a plain TestClient(app) never triggers them.
+    # No-op today (no lifespan handlers exist yet), but future ones would
+    # otherwise silently never run under test.
+    with TestClient(app) as test_client:
+        yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def make_contact(db_session):
+    """Factory fixture, shared across test modules that need ad-hoc
+    Contact rows (test_eligibility.py, test_quota_assignment.py) -- kept
+    in one place so their required-field defaults can't drift apart.
+    """
+
+    def _make(email, **overrides):
+        defaults = {"email": email, "is_active": True, "is_opt_in": True}
+        defaults.update(overrides)
+        contact = Contact(**defaults)
+        db_session.add(contact)
+        db_session.flush()
+        return contact
+
+    return _make
+
+
+@pytest.fixture
+def make_campaign(db_session):
+    def _make(project_number, name, **overrides):
+        defaults = {"project_number": project_number, "name": name}
+        defaults.update(overrides)
+        campaign = Campaign(**defaults)
+        db_session.add(campaign)
+        db_session.flush()
+        return campaign
+
+    return _make
