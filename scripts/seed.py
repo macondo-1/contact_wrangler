@@ -73,6 +73,44 @@ INDUSTRIES = ["Tech", "Finance", "Healthcare", "Retail", "Manufacturing", "Educa
 # would wrongly see them as recently contacted.
 NEVER_SENT_STATUSES = {AssignmentStatus.PENDING, AssignmentStatus.EXCLUDED}
 
+# Weighted, not uniform: a plain random.choice() across all 8 statuses
+# produces near-identical counts everywhere (~1/8 each) -- not what a real
+# campaign looks like (most contacts still PENDING/early, with a real
+# drop-off through OPENED/CLICKED/REPLIED, plus a smaller tail of
+# exception outcomes), and a poor stand-in for realistic fixture data
+# regardless of which consumer -- the Phase 6 dashboard chart, eligibility
+# queries, quota-fill logic -- ends up querying it. Order matches
+# AssignmentStatus's declaration order.
+ASSIGNMENT_STATUS_WEIGHTS = {
+    AssignmentStatus.PENDING: 30,
+    AssignmentStatus.SENT: 25,
+    AssignmentStatus.OPENED: 15,
+    AssignmentStatus.CLICKED: 8,
+    AssignmentStatus.REPLIED: 4,
+    AssignmentStatus.BOUNCED: 8,
+    AssignmentStatus.UNSUBSCRIBED: 5,
+    AssignmentStatus.EXCLUDED: 5,
+}
+# A plain `assert` is stripped entirely under `python -O`/PYTHONOPTIMIZE,
+# and nothing else exercises this module (it's a standalone script, not
+# imported by the test suite) -- an explicit check that actually runs
+# every time is the only real guarantee here. Also checks every weight is
+# positive: a future status added with weight 0 would satisfy a bare
+# key-set check while still never actually being seeded, the exact
+# failure this guards against.
+if set(ASSIGNMENT_STATUS_WEIGHTS) != set(AssignmentStatus) or not all(
+    w > 0 for w in ASSIGNMENT_STATUS_WEIGHTS.values()
+):
+    raise ValueError(
+        "ASSIGNMENT_STATUS_WEIGHTS must assign a positive weight to every "
+        "AssignmentStatus, or a status silently never gets seeded"
+    )
+# Hoisted out of seed_assignments_and_events()'s per-assignment loop --
+# these are rebuilt from a fixed, loop-invariant dict otherwise, up to
+# ~200k times over a full seed run for no benefit.
+_STATUS_CHOICES = list(ASSIGNMENT_STATUS_WEIGHTS)
+_STATUS_WEIGHTS = list(ASSIGNMENT_STATUS_WEIGHTS.values())
+
 
 def gen_contact_row(recent_emails: deque[str]) -> dict:
     """One fake contact row, occasionally a deliberate duplicate (exact,
@@ -209,7 +247,7 @@ def seed_assignments_and_events(
 
         assignment_rows = []
         for contact_id in chosen_contacts:
-            status = random.choice(list(AssignmentStatus))
+            status = random.choices(_STATUS_CHOICES, weights=_STATUS_WEIGHTS)[0]
             assignment_rows.append({
                 "campaign_id": campaign_id,
                 "contact_id": contact_id,
