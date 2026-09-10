@@ -42,26 +42,6 @@ EXCEPTION_STAGES = [
 ]
 FUNNEL_ORDER = PRIMARY_STAGES + EXCEPTION_STAGES
 
-# Task 6.2: split for the Plotly view. PRIMARY_STAGES is a genuine
-# progression a contact moves through in order; EXCEPTION_STAGES are
-# terminal side-branches a contact lands in INSTEAD of continuing (e.g.
-# BOUNCED doesn't happen "after" REPLIED). Charting all 8 as one funnel
-# would visually imply a monotonic decline that isn't real, so the funnel
-# only covers PRIMARY_STAGES, with EXCEPTION_STAGES broken out as a
-# separate bar chart alongside it.
-PRIMARY_STAGES = [
-    AssignmentStatus.PENDING,
-    AssignmentStatus.SENT,
-    AssignmentStatus.OPENED,
-    AssignmentStatus.CLICKED,
-    AssignmentStatus.REPLIED,
-]
-EXCEPTION_STAGES = [
-    AssignmentStatus.BOUNCED,
-    AssignmentStatus.UNSUBSCRIBED,
-    AssignmentStatus.EXCLUDED,
-]
-
 
 class FunnelStage(BaseModel):
     status: AssignmentStatus
@@ -114,7 +94,7 @@ def get_dashboard_view(
         rows=1,
         cols=2,
         column_widths=[0.65, 0.35],
-        specs=[[{"type": "funnel"}, {"type": "xy"}]],
+        specs=[[{"type": "funnel"}, {}]],
         subplot_titles=("Engagement funnel", "Terminal outcomes"),
     )
     fig.add_trace(
