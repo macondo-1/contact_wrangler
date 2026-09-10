@@ -120,3 +120,11 @@ def search_contacts(
     query = query.order_by(Contact.id).limit(limit).offset(offset)
 
     return db.scalars(query).all()
+
+
+@router.get("/{contact_id}", response_model=ContactOut)
+def get_contact(contact_id: int, db: Session = Depends(get_db)):
+    contact = db.get(Contact, contact_id)
+    if contact is None:
+        raise HTTPException(404, f"Contact {contact_id} not found")
+    return contact
