@@ -11,13 +11,17 @@ from contact_wrangler.models import Contact
 #   the DB computes these; setting them ourselves would error)
 # - gender_normalized/email_validation (derived by separate cleanup/
 #   verification processes, not raw import data)
+# - is_active/is_opt_in (security fix: these must NOT be settable via bulk
+#   import -- is_opt_in in particular records real marketing consent, and
+#   letting import data set it directly would let anyone forge consent with
+#   zero verification. Every imported contact gets the DB's own defaults;
+#   changing consent status must go through a separate, deliberate action.)
 IMPORTABLE_FIELDS = {
     "email", "first_name", "middle_name", "last_name", "phone",
     "age_raw", "date_of_birth", "gender_raw", "ethnicity", "nationality",
     "education", "linkedin", "facebook", "twitter", "other_links",
     "country", "state", "city", "zip_code", "job_title", "industry",
     "company_name", "job_keywords", "source", "filename",
-    "is_active", "is_opt_in",
 }
 
 LIST_FIELDS = {"other_links", "job_keywords"}
@@ -41,10 +45,6 @@ def _coerce_value(field: str, value):
             return date.fromisoformat(str(value))
         except ValueError:
             return None
-    if field in ("is_active", "is_opt_in"):
-        if isinstance(value, bool):
-            return value
-        return str(value).strip().lower() in ("true", "1", "yes")
     return value
 
 
@@ -77,13 +77,17 @@ def import_contacts(db: Session, rows: list[dict]) -> dict:
 
     seen_emails: set[str] = set()
     inserted = 0
-    skipped: list[str] = []
+    skipped_duplicate_count = 0
 
     for row in rows:
         normalized = _normalize_email(row.get("email"))
 
         if normalized and (normalized in existing_emails or normalized in seen_emails):
-            skipped.append(row.get("email"))
+            # Security fix: don't echo back which specific emails already
+            # exist -- that would let a caller enumerate/probe arbitrary
+            # addresses against the contacts table. A count is enough
+            # signal for the importer without leaking who's in the system.
+            skipped_duplicate_count += 1
             continue
 
         if normalized:
@@ -93,4 +97,4 @@ def import_contacts(db: Session, rows: list[dict]) -> dict:
         inserted += 1
 
     db.commit()
-    return {"inserted": inserted, "skipped_duplicates": skipped}
+    return {"inserted": inserted, "skipped_duplicate_count": skipped_duplicate_count}

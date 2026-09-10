@@ -103,6 +103,7 @@ class Contact(TimestampMixin, Base):
         Index("ix_contacts_active_validation", "is_active", "email_validation"),
         Index("ix_contacts_country", "country"),
         Index("ix_contacts_ethnicity", "ethnicity"),
+        Index("ix_contacts_industry", "industry"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
