@@ -7,3 +7,16 @@ __pycache__/
 docs/plans/
 *.egg-info/
 .pytest_cache/
+
+# Terraform: local state holds real (if only demo-scoped) secrets in
+# plaintext (e.g. the generated Postgres password), and .terraform/ is a
+# large regenerable provider-plugin cache. .terraform.lock.hcl is
+# deliberately NOT ignored -- that's meant to be committed, for
+# reproducible provider version pinning across machines.
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfvars
+terraform/*.tfvars.json
+terraform/crash.log
+terraform/crash.*.log
