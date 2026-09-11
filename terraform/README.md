@@ -10,9 +10,14 @@ Terraform practice, not building infrastructure this project doesn't need.
 
 ## Prerequisites
 
-1. **An AWS account** with billing enabled (a new account gets 12 months
-   of free-tier EC2 hours, which `t3.micro` — the default here — fits
-   inside).
+1. **An AWS account** with billing enabled. Historically, new accounts
+   got 12 months of free-tier EC2 hours that `t3.micro` (the default
+   here) fits inside, but AWS's free-tier terms have changed before and
+   may not be identical by the time you sign up — check the Free Tier
+   page in your own account rather than assuming this is free. Either
+   way, `t3.micro` on-demand pricing is small (roughly $0.01/hour) if it
+   turns out not to be free, and `terraform destroy` (below) stops the
+   meter entirely.
 2. **An IAM user or role with EC2/VPC permissions**, and its credentials
    configured locally so the AWS provider can find them —
    `aws configure` (access key + secret + default region), or an
@@ -65,6 +70,33 @@ the same way, over SSH:
 cd /opt/contact_wrangler
 docker compose exec app uv run python scripts/seed.py
 ```
+
+## Security notes worth actually reading
+
+- **The app has no authentication on any endpoint** (out of scope for
+  this MVP entirely) — anyone who finds `app_url` can read *and write*
+  data through it, not just view it. Port 8001 is public by default
+  because a viewable demo is the point of deploying this at all, but
+  don't leave one running unattended for long. Set
+  `-var="restrict_app_to_ssh_cidr=true"` to lock the app port down to
+  your own IP too (same restriction as SSH), e.g. while you're just
+  confirming the deployment works before deciding whether to show it to
+  anyone else.
+- **The generated Postgres password is recoverable two ways**, not just
+  via the (already-gitignored) local state file: it's also embedded in
+  the instance's EC2 user-data, retrievable by anyone with
+  `ec2:DescribeInstanceAttribute` on your AWS account (`aws ec2
+  describe-instance-attribute --attribute userData ...`, or via the
+  console). Irrelevant if you're the only one with access to your own
+  AWS account, but worth knowing if you ever grant anyone else even
+  read-only access to it.
+- **Any `apply` that changes `user_data.sh.tpl` (or `repo_url`,
+  `postgres_password`'s inputs, etc.) destroys and recreates the whole
+  instance**, including Postgres's data — it lives only in a
+  docker-compose volume on that one instance's own root disk, nowhere
+  else. Fine here (synthetic, re-seedable data), but don't assume a
+  routine `apply` is always safe against a long-lived instance holding
+  anything you'd actually mind losing.
 
 ## Tearing it down
 
