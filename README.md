@@ -53,9 +53,10 @@ incidental choice.
   filtering/eligibility → an `is_gmail` NULL-handling fix → an additional
   demographic index — not one big upfront migration, but the kind of
   incremental evolution schemas actually go through.
-- 12 endpoints (`GET /docs` for the full interactive spec once the stack
-  is running), covering contact ingestion/dedup, campaign/quota
-  management, assignment, event logging, and a funnel dashboard.
+- 12 functional endpoints plus a `GET /health` liveness check (13 routes
+  total; `GET /docs` for the full interactive spec once the stack is
+  running), covering contact ingestion/dedup, campaign/quota management,
+  assignment, event logging, and a funnel dashboard.
 - `pytest` + `testcontainers[postgres]`: the test suite runs against a
   real, throwaway Postgres container migrated with the actual Alembic
   chain, not a hand-maintained schema stand-in.
@@ -96,11 +97,21 @@ Two separate queries exist on purpose, not one: `eligible_contacts_for_campaign`
 (assignment-time — no cooldown check, since being assigned to a campaign
 isn't the same as being emailed) and `sendable_assignments_for_campaign`
 (send-time — enforces a rolling cooldown that's **global across all
-campaigns**, not per-campaign, so a contact can't be assigned to five
-campaigns and end up emailed five times in the same week). Both share one
-`baseline_contactable_filters()` helper for the underlying "is this contact
-even reachable" check, so the two queries and the assignment endpoint's own
-re-check of that same condition can't drift out of sync with each other.
+campaigns**, not per-campaign, so a contact assigned to five campaigns
+couldn't legitimately be emailed by all five in the same week). Both share
+one `baseline_contactable_filters()` helper for the underlying "is this
+contact even reachable" check, so the two queries and the assignment
+endpoint's own re-check of that same condition can't drift out of sync
+with each other.
+
+Worth being honest about: `sendable_assignments_for_campaign` is fully
+implemented and has real test coverage, but **no endpoint calls it yet**.
+This MVP's scope stops at recording that a contact was assigned and that
+an email event happened (`POST /events`) — it deliberately doesn't include
+an actual email-sending step (see "What I'd change" below), so there's
+nothing yet in the running API that would call the send-time check. It's
+written as the contract a future sending process should use, not as
+currently-enforced behavior.
 
 ### Quota-assignment semantics
 
@@ -149,6 +160,13 @@ assignments outright.
   suite. That caught real bugs, but later — writing tests right after the
   schema would give every endpoint a regression safety net from its first
   commit, not just from Phase 5 onward.
+- **Actually sending an email is still out of scope.** This MVP models
+  contacts, campaigns, quotas, assignments, and event logging, but stops
+  short of an SMTP-sending step — `POST /events` records that a send
+  happened, it doesn't trigger one, and the send-time cooldown query
+  (`sendable_assignments_for_campaign`) is implemented and tested but has
+  no caller yet, because nothing in this MVP actually performs a send. A
+  real sender service consuming that query is the natural next piece.
 
 ## Setup
 
@@ -178,8 +196,12 @@ exercise the dedup path for real), 100 campaigns, quotas, assignments, and
 events — enough volume that indexing and dedup choices visibly matter.
 Not idempotent; run once against a fresh database
 (`docker compose down -v` first if re-seeding). `faker` is a **dev
-dependency**, not a runtime one — see the comment in `pyproject.toml` if
-hardening the image to a `--no-dev` install later.
+dependency**, not a runtime one — it's a data-generation tool the running
+app never needs at request time, the same category as a test framework.
+It runs fine inside the container as configured today (the Dockerfile
+doesn't currently exclude dev dependencies from the image), but if the
+build is ever hardened to a `--no-dev` production install, this script
+would need `faker` installed separately to keep working.
 
 ### Dashboard
 
